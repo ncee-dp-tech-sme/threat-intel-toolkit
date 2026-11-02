@@ -39,3 +39,7 @@ __pycache__/
 .venv/
 .python-version
 # === /cowork-guardrails ===
+
+# Keep the installer settings template tracked; ignore Bob's local project config (may hold tokens)
+!.env.example
+.bob/

@@ -75,19 +75,36 @@ Requires only Python 3.8+ (standard library — no pip installs). Defanged input
 🔴 MALICIOUS (3+ independent feeds) · 🔴 EXPLOITED (CVE on CISA KEV) · 🟠 SUSPICIOUS (1–2
 feeds) · 🟡 CONTEXT (Tor/DROP) · ⚪ CLEAN (no feed lists it — *not* proof of safety).
 
+## Install in IBM Bob
+
+One command installs both skills and a **Threat Intel Analyst** mode into IBM Bob:
+
+```bash
+git clone https://github.com/ncee-dp-tech-sme/threat-intel-toolkit.git
+cd threat-intel-toolkit
+scripts/install-bob.sh install
+```
+
+Preview first with `--dry-run`; undo with `rollback`; switch between this fork and the original
+(`kevinmhorvath/threat-intel-toolkit`) with `scripts/install-bob.sh switch fork|upstream`. Full
+beginner-friendly guide, prerequisites and troubleshooting: **[docs/IBM-BOB-INSTALL.md](docs/IBM-BOB-INSTALL.md)**.
+Settings template: [`.env.example`](.env.example).
+
 ## Install as a Claude Code plugin
 
 This repo doubles as its own single-plugin marketplace (`.claude-plugin/marketplace.json` +
-`.claude-plugin/plugin.json`), so an org can one-click install it:
+`.claude-plugin/plugin.json`), so an org can one-click install it from this fork:
 
 ```
-/plugin marketplace add kevinmhorvath/threat-intel-toolkit
+/plugin marketplace add ncee-dp-tech-sme/threat-intel-toolkit
 /plugin install threat-intel-toolkit@threat-intel-marketplace
 ```
 
-(If you fork or rename the repo, update the path in the first command and `owner.name` in
-`.claude-plugin/marketplace.json` to match.) You can also just zip the folder and share it, or
-install the skill standalone.
+To use the original repository instead, replace the first command's path with
+`kevinmhorvath/threat-intel-toolkit`. (If you fork or rename the repo again, update that path,
+`owner.name` in `.claude-plugin/marketplace.json` and the `homepage`/`repository` URLs in
+`.claude-plugin/plugin.json`.) You can also just zip the folder and share it, or install a skill
+standalone.
 
 New feeds and fixes are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for how to add a feed.
 

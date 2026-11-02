@@ -3,6 +3,21 @@
 All notable changes to the Threat Intel Toolkit are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **IBM Bob integration.** `scripts/install-bob.sh` (install / update / switch / status / check /
+  rollback / uninstall, with dry-run, backups and automatic restore on failure),
+  `scripts/bob_mode.py` (converts the analyst agent into a Bob custom mode), `.env.example`, and
+  the beginner guide `docs/IBM-BOB-INSTALL.md`, including switching between the fork and upstream.
+
+### Changed
+
+- Install commands in `README.md` now point at the fork (`ncee-dp-tech-sme/threat-intel-toolkit`);
+  `.claude-plugin/marketplace.json` owner updated and `homepage`/`repository` added to
+  `.claude-plugin/plugin.json`. `.gitignore` now keeps `.env.example` tracked and ignores `.bob/`.
+
 ## [1.1.0] - 2026-08-13
 
 ### Fixed

@@ -9,6 +9,7 @@
 #
 # Change log:
 #   Mon Nov  2 15:58:00 CET 2026  Initial version (install/update/switch/status/check/rollback/uninstall).
+#   Mon Nov  2 16:27:10 CET 2026  Fix project directory normalization, auto-detect project scope, and cleanup nested .bob directories in rollback/uninstall.
 
 set -eu
 (set -o pipefail) 2> /dev/null && set -o pipefail
@@ -79,7 +80,7 @@ load_env() {
   done < "$f"
 }
 
-# Write or replace KEY=VALUE in the .env of the local checkout. Mon Nov  2 15:58:00 CET 2026
+# Write or replace KEY=VALUE in the .env of the local checkout. Mon Nov  2 16:27:10 CET 2026
 persist_env() {
   key=$1; val=$2
   if [ -z "$REPO_DIR" ]; then log WARN "No local checkout: '$key' applies to this run only."; return 0; fi
@@ -87,11 +88,13 @@ persist_env() {
   [ -f "$envf" ] || cp "$REPO_DIR/.env.example" "$envf"
   tmp="$envf.tmp.$$"
   grep -v "^${key}=" "$envf" > "$tmp" || true
-  printf '%s=%s\n' "$key" "$val" >> "$tmp"
+  if [ -n "$val" ]; then
+    printf '%s=%s\n' "$key" "$val" >> "$tmp"
+  fi
   mv "$tmp" "$envf"
 }
 
-# Apply defaults and derive all paths. Mon Nov  2 15:58:00 CET 2026
+# Apply defaults and derive all paths. Mon Nov  2 16:27:10 CET 2026
 resolve_config() {
   : "${TI_SOURCE:=fork}"
   : "${TI_FORK_URL:=https://github.com/ncee-dp-tech-sme/threat-intel-toolkit.git}"
@@ -106,12 +109,33 @@ resolve_config() {
   : "${LOG_LEVEL:=INFO}"
   case $LOG_LEVEL in DEBUG | INFO | WARN | ERROR) ;; *) LOG_LEVEL=INFO ;; esac
 
+  if [ -z "$CLI_SCOPE" ] && [ -n "$REPO_DIR" ] && [ "$TI_SCOPE" = global ]; then
+    if [ -f "$REPO_DIR/.bob/threat-intel-toolkit.manifest" ] || [ -d "$REPO_DIR/.bob/backups/threat-intel-toolkit" ]; then
+      TI_SCOPE=project
+      TI_PROJECT_DIR=$REPO_DIR
+    elif [ -f "$REPO_DIR/.bob/.bob/threat-intel-toolkit.manifest" ] || [ -d "$REPO_DIR/.bob/.bob/backups/threat-intel-toolkit" ]; then
+      TI_SCOPE=project
+      TI_PROJECT_DIR=$REPO_DIR/.bob/.bob
+    fi
+  fi
+
   case $TI_SCOPE in
     global) SCOPE_BOB=$BOB_HOME ;;
     project)
+      if [ -z "$TI_PROJECT_DIR" ] && [ -n "$REPO_DIR" ]; then TI_PROJECT_DIR=$REPO_DIR; fi
       [ -n "$TI_PROJECT_DIR" ] || die "Project scope needs a folder: add --project-dir /path/to/your/project"
       [ -d "$TI_PROJECT_DIR" ] || die "Project folder not found: $TI_PROJECT_DIR"
-      SCOPE_BOB=$(cd "$TI_PROJECT_DIR" && pwd)/.bob ;;
+      DIR_ABS=$(cd "$TI_PROJECT_DIR" && pwd)
+      if [ -f "$DIR_ABS/threat-intel-toolkit.manifest" ] && [ "$(basename "$DIR_ABS")" = ".bob" ] && [ "$(basename "$(dirname "$DIR_ABS")")" = ".bob" ]; then
+        SCOPE_BOB=$DIR_ABS
+      elif [ "$(basename "$DIR_ABS")" = ".bob" ]; then
+        SCOPE_BOB=$DIR_ABS
+        TI_PROJECT_DIR=$(dirname "$DIR_ABS")
+      else
+        SCOPE_BOB=$DIR_ABS/.bob
+        TI_PROJECT_DIR=$DIR_ABS
+      fi
+      ;;
     *) die "TI_SCOPE must be 'global' or 'project' (got '$TI_SCOPE')" ;;
   esac
   SKILLS_DIR=$SCOPE_BOB/skills
@@ -214,18 +238,34 @@ backup_path() {
   fi
 }
 
-# Put every path recorded in a backup back as it was. Mon Nov  2 15:58:00 CET 2026
+# Put every path recorded in a backup back as it was. Mon Nov  2 16:27:10 CET 2026
 restore_backup() {
   d=$1
   [ -f "$d/index" ] || return 0
   while IFS='|' read -r id p; do
-    case $p in "$BOB_HOME"/* | "$SCOPE_BOB"/*) ;; *) log WARN "Skipping unexpected path in backup: $p"; continue ;; esac
+    case $p in "$BOB_HOME"/* | "$SCOPE_BOB"/* | *"/.bob/.bob/"*) ;; *) log WARN "Skipping unexpected path in backup: $p"; continue ;; esac
     rm -rf "$p"
     if [ "$id" != "-" ]; then
       mkdir -p "$(dirname "$p")"
       cp -Rp "$d/items/$id" "$p"
     fi
   done < "$d/index"
+}
+
+# Clean up empty skills folder or accidental nested .bob/.bob folders. Mon Nov  2 16:27:10 CET 2026
+cleanup_scope() {
+  if [ -d "$SKILLS_DIR" ]; then
+    rmdir "$SKILLS_DIR" 2> /dev/null || true
+  fi
+  case $SCOPE_BOB in
+    */.bob/.bob)
+      rm -rf "$SCOPE_BOB"
+      log INFO "Cleaned up accidental nested folder: $SCOPE_BOB"
+      ;;
+    *)
+      rmdir "$SCOPE_BOB" 2> /dev/null || true
+      ;;
+  esac
 }
 
 # Remove temp files; undo a half-finished change. Mon Nov  2 15:58:00 CET 2026
@@ -342,6 +382,7 @@ build_cache() {
 }
 
 # ---------------------------------------------------------------- commands
+# Install toolkit skills and mode into IBM Bob. Mon Nov  2 16:27:10 CET 2026
 cmd_install() {
   resolve_source
   check_prereqs
@@ -355,6 +396,10 @@ cmd_install() {
   COMMITTED=true
   prune_backups
   build_cache
+  if [ "$TI_SCOPE" = project ] && [ -n "$REPO_DIR" ]; then
+    persist_env TI_SCOPE "project"
+    persist_env TI_PROJECT_DIR "$TI_PROJECT_DIR"
+  fi
   log INFO "----------------------------------------------------------------"
   log INFO "DONE. Threat Intel Toolkit ($SOURCE_NAME @ $COMMIT) is installed."
   log INFO "Next: restart IBM Bob, choose the 'Threat Intel Analyst' mode and ask:"
@@ -411,6 +456,7 @@ cmd_check() {
   fi
 }
 
+# Restore previous state from the latest backup. Mon Nov  2 16:27:10 CET 2026
 cmd_rollback() {
   [ -d "$BACKUP_ROOT" ] || die "No backups found in $BACKUP_ROOT"
   latest=$(ls -1 "$BACKUP_ROOT" | grep -v 'rolled-back$' | sort | tail -1 || true)
@@ -420,9 +466,11 @@ cmd_rollback() {
   confirm
   restore_backup "$BACKUP_ROOT/$latest"
   mv "$BACKUP_ROOT/$latest" "$BACKUP_ROOT/$latest.rolled-back"
+  cleanup_scope
   log INFO "Rolled back. Restart IBM Bob to apply."
 }
 
+# Remove installed skills and mode block; keep backup. Mon Nov  2 16:27:10 CET 2026
 cmd_uninstall() {
   [ -f "$MANIFEST" ] || log WARN "No install manifest found; removing any toolkit files anyway."
   log INFO "Will remove: skills ($SKILL_NAMES), the 'Threat Intel Analyst' mode block and the manifest. A backup is kept."
@@ -430,13 +478,22 @@ cmd_uninstall() {
   confirm
   TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/ti-bob.XXXXXX")
   find_helper
-  BACKUP_DIR=$BACKUP_ROOT/$(date +%Y%m%d-%H%M%S)-uninstall
+  case $SCOPE_BOB in
+    */.bob/.bob)
+      PARENT_BOB=$(dirname "$SCOPE_BOB")
+      BACKUP_DIR=$PARENT_BOB/backups/threat-intel-toolkit/$(date +%Y%m%d-%H%M%S)-uninstall
+      ;;
+    *)
+      BACKUP_DIR=$BACKUP_ROOT/$(date +%Y%m%d-%H%M%S)-uninstall
+      ;;
+  esac
   mkdir -p "$BACKUP_DIR"; : > "$BACKUP_DIR/index"
   mode_files > "$TMP_ROOT/modefiles"
   for n in $SKILL_NAMES; do backup_path "$SKILLS_DIR/$n"; rm -rf "${SKILLS_DIR:?}/$n"; done
   backup_path "$MANIFEST"; rm -f "$MANIFEST"
   while IFS= read -r f; do backup_path "$f"; python3 "$HELPER" remove --file "$f"; done < "$TMP_ROOT/modefiles"
   COMMITTED=true
+  cleanup_scope
   log INFO "Uninstalled. Restart IBM Bob. To undo this, run: scripts/install-bob.sh rollback"
 }
 
